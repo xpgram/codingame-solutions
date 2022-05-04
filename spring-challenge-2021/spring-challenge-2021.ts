@@ -60,7 +60,7 @@ function parseStruct<T extends readonly PropertyTuple[]>(properties: T) : Object
 
 module structs {
 
-  export const cellSetup = <const>[
+  export const boardCell = <const>[
     ['index', Number],
     ['richness', Number],
     ['neigh0', Number],
@@ -71,7 +71,7 @@ module structs {
     ['neigh5', Number],
   ];
 
-  export const cell = <const>[
+  export const tree = <const>[
     ['index', Number],
     ['size', Number],
     ['isMine', Boolean],
@@ -92,11 +92,11 @@ module structs {
 
 
 // game setup
-const cells = [] as ObjectFrom<typeof structs.cellSetup>[];
+const cells = [] as ObjectFrom<typeof structs.boardCell>[];
 
 let [ numberOfCells ] = parseLine(Number);
 while (numberOfCells--) {
-  cells.push( parseStruct(structs.cellSetup) );
+  cells.push( parseStruct(structs.boardCell) );
 }
  
 // game loop
@@ -107,11 +107,11 @@ while (true) {
   const playerData = parseStruct(structs.player);
   const opponentData = parseStruct(structs.opponent);
 
-  const celldata = [] as ObjectFrom<typeof structs.cell>[];
+  const celldata = [] as ObjectFrom<typeof structs.tree>[];
 
   let [ numberOfTrees ] = parseLine(Number);
   while (numberOfTrees--)
-    celldata.push( parseStruct(structs.cell) );
+    celldata.push( parseStruct(structs.tree) );
 
   const actions = [] as string[];
 
@@ -119,9 +119,85 @@ while (true) {
   while (possibleActions--)
     actions.push(readline());
 
+  // Assemble data
+
+
   // Turn Logic
+
 
   // Final
   console.log(actions.shift());
  }
- 
+
+
+
+// Alt Below — Is this better?
+
+let input: string[] = readline().split(' ');
+
+function readToken<T>(f: (s: string) => T): T {
+  const r = f(input.shift());
+  if (input.length === 0)
+    input = readline().split(' ');
+  return r;
+}
+
+function readNum() { return readToken(Number); }
+function readBool() { return readToken(Boolean); }
+
+// game setup
+const setup = {
+  board: [
+    ...new Array(readNum()).fill(undefined).map(n => {
+      return {
+        index: readNum(),
+        richness: readNum(),
+        n0: readNum(),
+        n1: readNum(),
+        n2: readNum(),
+        n3: readNum(),
+        n4: readNum(),
+        n5: readNum(),
+      }
+    })
+  ]
+}
+
+// game loop
+while (true) {
+  const frame = {
+    day: readNum(),
+    nutrients: readNum(),
+    playerData: {
+      sun: readNum(),
+      score: readNum(),
+    },
+    oppData: {
+      sun: readNum(),
+      score: readNum(),
+      isWaiting: readBool(),
+    },
+    cells: [
+      ...new Array(readNum()).fill(undefined).map(n => {
+        return {
+          index: readNum(),
+          size: readNum(),
+          isMine: readBool(),
+          isDormant: readBool(),
+        }
+      })
+    ],
+    actions: [
+      ...new Array(readNum()).fill(undefined).map(n => readline()),
+    ]
+  }
+
+  // Assemble data
+
+
+  // Turn logic
+
+
+  // Final
+  console.log(frame.actions.shift());
+}
