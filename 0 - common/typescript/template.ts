@@ -2,7 +2,6 @@
 /** Conforms record-type members to an extension of type T. */
 const confirmType = <T>() => <R extends Record<string, T>>(obj: R) => obj;
 
-/** A console-read module for codingame input. */
 module input {
 
   type InputConstructor<T> = (s: string) => T;
@@ -41,20 +40,12 @@ module input {
 
 }
 
-
 module structs {
 
   export module init {
 
-    export const cell = {
+    export const data = {
       index: 0,
-      richness: 0,
-      neigh0: 0,
-      neigh1: 0,
-      neigh2: 0,
-      neigh3: 0,
-      neigh4: 0,
-      neigh5: 0,
     }
 
   }
@@ -63,24 +54,11 @@ module structs {
 
     export const general = {
       day: 0,
-      nutrients: 0,
-    }
-
-    export const tree = {
-      index: 0,
-      size: 0,
-      isMine: false,
-      isDormant: false,
-    }
-
-    export const player = {
-      sun: 0,
       score: 0,
     }
 
-    export const opponent = {
-      isWaiting: false,
-      ...player,
+    export const entity = {
+      hp: 0,
     }
 
   }
@@ -90,11 +68,10 @@ module structs {
 
 // game setup
 
-const cells = [] as typeof structs.init.cell[];
+const cells = [] as typeof structs.init.data[];
 
 for (let i=input.token(Number); i--;)
-  cells.push( input.struct(structs.init.cell) );
-
+  cells.push( input.struct(structs.init.data) );
 
 // game loop
 
@@ -102,17 +79,11 @@ while (true) {
   // frame data
   const data = {
     general: input.struct(structs.frame.general),
-    player: input.struct(structs.frame.player),
-    opponent: input.struct(structs.frame.opponent),
-    trees: [] as typeof structs.frame.tree[],
-    actions: [] as string[],
+    trees: [] as typeof structs.frame.entity[],
   }
 
   for (let i=input.token(Number); i--;)
-    data.trees.push( input.struct(structs.frame.tree) );
-  
-  for (let i=input.token(Number); i--;)
-    data.actions.push( input.line() );
+    data.trees.push( input.struct(structs.frame.entity) );
 
   // assemble data
 
@@ -121,5 +92,5 @@ while (true) {
 
 
   // final
-  console.log(data.actions[0]);
+  console.log('WAIT');
 }
