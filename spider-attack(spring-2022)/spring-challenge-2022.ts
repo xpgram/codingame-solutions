@@ -1,4 +1,22 @@
 
+/** Returns true if n is within the interval [min,max] */
+function within(n: number, min: number, max: number) {
+    return n >= min && n <= max;
+}
+
+/** Returns n confined to the interval [min,max] */
+function clamp(n: number, nmin: number, nmax: number) {
+    return Math.min(nmax, Math.max(0, nmin));
+}
+
+/** Validate Record types without losing inferred type.
+ * 
+ * Usage:
+ * ```
+ * const Dict = confirmType<Metadata>() ({ one: {...}, two: {...} })
+ * ```
+ */
+const confirmType = <Req>() => <T extends Record<string, Req>>(obj: T) => obj;
 
 /** An unmodifiable point in 2-dimensional space. */
 export type ImmutablePointPrimitive = {
@@ -282,11 +300,6 @@ enum PlayerTarget {
     Opponent = 2,
 }
 
-enum AiMode {
-    Defender,
-    Attacker,
-}
-
 module Constants {
     let inputs: string[] = readline().split(' ');
 
@@ -304,7 +317,7 @@ module Constants {
         export const sightRadius = 6000;
         export const detectionRadius = 5000;
         export const vulnerableRadius = 300;
-        export const dangerRadius = Math.floor(detectionRadius * 0.5);
+        export const dangerRadius = Math.floor(detectionRadius * 0.8);
     };
 
     export const hero = {
@@ -371,7 +384,7 @@ function readEntityData(): EntityData {
         type: nextToken(parseInt) as EntityType,
         position: new Point(nextToken(parseInt), nextToken(parseInt)),
         shieldLife: nextToken(parseInt),
-        isControlled: nextToken(Boolean),
+        isControlled: !nextToken(Boolean),  // ..?
         hp: nextToken(parseInt),
         speed: new Point(nextToken(parseInt), nextToken(parseInt)),
         nearBase: nextToken(Boolean),
@@ -387,14 +400,6 @@ function readEntityData(): EntityData {
 
 
 
-
-interface GameObjectPackage {
-    allyBase: Base;
-    oppBase: Base;
-    monsters: Monster[];
-    heroes: Hero[];
-    oppHeroes: OppHero[];
-}
 
 abstract class Entity {
     readonly game: GameObjectPackage;
@@ -418,9 +423,18 @@ abstract class Entity {
         return `${ent_name[type]} ${id}`;
     }
 
-    distanceTo(other: Entity | Point): number {
-        return this.data.position.distance( (isPointPrimitive(other) ? other : other.data.position ));
+    sameEntity(other: Entity): boolean {
+        return (this.data.id === other.data.id);
     }
+
+    distanceTo(other: Entity | Base | Point): number {
+        return this.data.position.distance(
+            (isPointPrimitive(other)) && other ||
+            (other instanceof Base)   && other.position ||
+            (other as Entity).data.position
+        );
+    }
+
 }
 
 
@@ -442,7 +456,7 @@ class Monster extends Entity {
     constructor(game: GameObjectPackage, data: EntityData) {
         super(game);
         this.fill(data);
-        
+
         const travelTargets: Record<PlayerTarget, Point> = {
             [PlayerTarget.Neutral]: this.data.position,
             [PlayerTarget.Allied]: this.game.allyBase.position,
@@ -498,267 +512,615 @@ class OppHero extends Entity {
 
 
 
-interface HeroMemory {
-    heroId: number;
-    role: AiMode;
+module ActionFunction {
 
-    lastTarget?: Monster;
-    target?: Monster;
-    travelTarget?: Point;
-    idle: boolean;
-
-    wind: boolean;      // Convert to spell enum
-    spellTargetId: number;
-
-    noSwap: boolean;
-}
-
-class Hero extends Entity {
-
-    mem: HeroMemory = {
-        heroId: 0,
-        role: AiMode.Defender,
-
-        lastTarget: undefined,
-        target: undefined,
-        travelTarget: undefined,
-        idle: true,
-
-        wind: false,
-        spellTargetId: 0,
-
-        noSwap: false,
-    }
-
-    constructor(game: GameObjectPackage, data: EntityData) {
-        super(game);
-        this.fill(data);
-        this.mem.heroId = data.id % Constants.heroesPerPlayer;
-        console.assert(data.type === EntityType.Hero, `${this.nameId()} is not Hero: type=${data.type}`);
-    }
-
-    fill(data: EntityData) {
-        super.fill(data);
-        const mem = this.mem;
-        mem.lastTarget = mem.target;
-        mem.target = undefined;        // By default, none.
-        mem.idle = true;
-        mem.wind = false;
-        mem.spellTargetId = 0;
-        mem.noSwap = false;     // <- This is getting unwieldy.
-        mem.role = (mem.heroId !== 1) ? AiMode.Defender : AiMode.Attacker;
-    }
-
-
-    protected getBaseRestingPose(): Point {
-        const { position: basePos, sentryPoseVectors } = this.game.allyBase;
-        const { mem } = this;
-
-        const baseDistance = Constants.playerBase.sightRadius;
-        const distFactor = (mem.role === AiMode.Defender) ? 1.0 : 1.25;
-        const sliceVector = sentryPoseVectors[mem.heroId % sentryPoseVectors.length];
-        return sliceVector.multiply(distFactor).multiply(baseDistance).add(basePos);
-    }
-
-    protected getAttackPose(target: Monster): Point {
-        const { knownMonsters } = this.game.allyBase;
-
+    export function getIntersectionPoint(hero: Hero, target: Monster, game: GameObjectPackage): Point {
         const { attackRadius } = Constants.hero;
         const multiAttackRadius = attackRadius * 1.7;
 
-        const nearbyAttackPoints = knownMonsters
-            .filter(monster => monster.data.position.distance(target.data.position) < multiAttackRadius)
+        const nearbyAttackPoints = game.monsters
+            .filter(monster => !monster.sameEntity(target) && monster.distanceTo(target) < multiAttackRadius)
             .map(monster => monster.data.position);
-        
-        if (nearbyAttackPoints.length === 0)
-            nearbyAttackPoints.push(target.data.position);
-            // This should never happen, though.
+        nearbyAttackPoints.push( target.data.position );    // Guarantee the list is never empty
 
         const averagePosition = nearbyAttackPoints
             .reduce((a, b) => a.add(b))
             .multiply(1 / nearbyAttackPoints.length);
 
-        const distToTarget = target.data.position.distance(this.data.position);
+        // Use the main target's speed vector to determine a good intersection point
+        const distToTarget = hero.distanceTo(target);
         const distFactor = distToTarget / attackRadius;
         const projectedTravelVector = target.data.speed.multiply(distFactor);
 
-        return averagePosition.add(projectedTravelVector);
+        const intersectionPoint = averagePosition.add(projectedTravelVector);
+
+        // console.error(`${hero.nameId()} -> ${target.nameId()} at ${target.data.position.toLog()} set to ${intersectionPoint.toLog()}`);
+
+        return intersectionPoint;
     }
 
-    protected setTarget(monster: Monster) {
-        this.mem.target = monster;
-        this.mem.target.targetedCount++;
-        this.mem.idle = false;
+}
+
+
+
+
+
+
+
+
+
+
+enum ActionType {
+    Wait,
+    Travel,
+    Attack,
+    Wind,
+    Shield,
+    Control,
+}
+
+enum SwapStyle {
+    None,
+    ExcludeDistance,
+    Full,
+}
+
+interface Instruction {
+    readonly action: ActionData;        // The Action to be conducted. This is for property references.
+    readonly where?: Point;         // The point to be issued with the command; usually this will be where to move to.
+    readonly entity?: Entity;       // The entity to target with the command. Besides reference, this is only used for its entId.
+    readonly message?: string;      // Optional message to append
+    readonly noOverride?: boolean;  // Set to true if this instruction cannot be overridden.
+}
+
+function instructionToCommand(ins: Instruction): string {
+    return ins.action.cmd
+        .replace('{where}', ins.where?.trunc().toString() ?? Point.Zero.toString())
+        .replace('{id}', ins.entity?.data.id.toString() ?? '0');
+}
+
+interface ActionData {
+    readonly label: string;
+    readonly cmd: string;
+    readonly type: ActionType;
+    readonly swap: SwapStyle;
+    trigger(hero: Hero, game: GameObjectPackage): boolean;
+    execute(hero: Hero, game: GameObjectPackage): Instruction;
+    swapReexecute(hero: Hero, ins: Instruction, game: GameObjectPackage);
+}
+
+const ActionData_Defaults = {
+    swap: SwapStyle.Full,
+    swapReexecute(hero, ins, game) { return ins; },
+}
+
+/** Actions which are focused on selecting and delegating responsibilities. */
+const Action = confirmType<ActionData>() ({
+    Defend: {
+        ...ActionData_Defaults,
+        label: "Defend",
+        cmd: "MOVE {where} M{id}",
+        type: ActionType.Attack,
+        trigger(hero, game) {
+            return game.allyBase.threats.some( m => m.remainingTargetCount() > 0 );
+        },
+        execute(hero, game) {
+            const { threats } = game.allyBase;
+
+            const isInDangerZone = (m: Monster) => (m.distanceTo(game.allyBase) < Constants.playerBase.detectionRadius);
+            const isUnhandled = (m: Monster) => (m.remainingTargetCount() > 0);
+            
+            // Monsters targeting base
+            const secondPotential = threats
+                .filter(isUnhandled);
+
+            // Monsters close to base
+            const firstPotential = secondPotential
+                .filter(isInDangerZone);
+            
+            // first > second > all(include already handled)
+            const potentialTargets = (
+                (firstPotential.length > 0) && firstPotential ||
+                (secondPotential.length > 0) && secondPotential ||
+                threats
+            );
+
+            function triageScore(monster: Monster): number {
+                // TODO Current triage score over-prioritizes (exclusively) hero closeness, does not factor base closeness
+                return monster.distanceTo(hero);
+            }
+
+            const closest = potentialTargets
+                .map( monster => ({monster, score: triageScore(monster)}) )
+                .reduce( (a,b) => (a.score < b.score) && a || b )
+                .monster;
+
+            return {
+                action: this,
+                where: ActionFunction.getIntersectionPoint(hero, closest, game),
+                entity: closest,
+            }
+        },
+        swapReexecute(hero, ins, game) {
+            return {
+                ...ins,
+                where: ActionFunction.getIntersectionPoint(hero, ins.entity as Monster, game),
+            }
+        }
+    },
+    Hunt: <ActionData & {candidatesCache: Monster[]}>{
+        candidatesCache: [],
+
+        ...ActionData_Defaults,
+        label: "Hunt",
+        cmd: "MOVE {where} M{id}",
+        type: ActionType.Attack,
+        swap: SwapStyle.ExcludeDistance,
+        trigger(hero, game) {
+            const baseDistCoefficient = hero.memory.role.wanderingDistCoefficient;
+            const maxBaseDistance = Constants.playerBase.sightRadius * baseDistCoefficient;
+
+            const candidates = game.monsters.filter( monster => {
+                const farFromBase = monster.distanceTo(game.allyBase) > maxBaseDistance;
+                const closeToSelf = monster.distanceTo(hero) < Constants.hero.sightRadius;
+                const marked      = monster.targetedCount > 0;
+                const targOppBase = monster.data.threatFor === game.oppBase.id;
+                return closeToSelf && !farFromBase && !marked && !targOppBase;
+            })
+
+            this.candidatesCache = candidates;
+            return candidates.length > 0;
+        },
+        execute(hero, game) {
+            const closest = this.candidatesCache
+                .reduce( (a,b) => (a.distanceTo(hero) < b.distanceTo(hero)) && a || b );
+            return {
+                action: this,
+                where: ActionFunction.getIntersectionPoint(hero, closest, game),
+                entity: closest,
+            }
+        },
+    },
+    RestAtSentry: {
+        ...ActionData_Defaults,
+        label: "Sentry",
+        cmd: "MOVE {where}",
+        type: ActionType.Travel,
+        swap: SwapStyle.ExcludeDistance,
+        trigger() { return true; },
+        execute(hero, game) {
+            // TODO Wandering
+            // We could follow a carrot-point which rotates ±15 degrees every frame.
+            // We could have allyBase choose new resting poses (non-sentry) every 20 frames or so.
+
+            const sliceVectors = game.allyBase.sentryPoseVectors;
+            const restingDistCoefficient = hero.memory.role.restingDistCoefficient;
+            const restingPose = sliceVectors[hero.memory.heroId % sliceVectors.length]
+                .multiply(Constants.playerBase.sightRadius)
+                .multiply(restingDistCoefficient)
+                .add(game.allyBase.position);
+
+            return {
+                action: this,
+                where: restingPose,
+            }
+        },
+    },
+    RestAtOppBase: {
+        ...ActionData_Defaults,
+        label: "Pressure",
+        cmd: "MOVE {where}",
+        type: ActionType.Travel,
+        swap: SwapStyle.None,
+        trigger() { return true; },
+        execute(hero, game) {
+            const sliceVectors = game.allyBase.sentryPoseVectors;
+            const restingPose = sliceVectors[hero.memory.heroId % sliceVectors.length]
+                .negative()
+                .multiply(Constants.playerBase.sightRadius * .65)
+                .add(game.oppBase.position);
+
+            return {
+                action: this,
+                where: restingPose,
+            }
+        },
+    },
+    DoNothing: {
+        ...ActionData_Defaults,
+        label: "Wait",
+        cmd: "WAIT",
+        type: ActionType.Wait,
+        swap: SwapStyle.ExcludeDistance,
+        trigger() { return true; },
+        execute() { return { action: this } },
+    },
+});
+
+/** Special actions which are intended to circumstantially override regular ones. */
+const SAction = confirmType<ActionData>() ({
+    ProtectSelf: {
+        ...ActionData_Defaults,
+        label: "Protect->Self",
+        cmd: "SPELL SHIELD {id}",
+        type: ActionType.Shield,
+        swap: SwapStyle.None,
+        trigger(hero, game) {
+            const timeCheck = game.time > 90;
+            const notShielded = hero.data.shieldLife === 0;
+            const nearbyOpp = game.oppHeroes.some( opp => opp.distanceTo(hero) < Constants.spell.control.effectiveDistance );
+            return timeCheck && notShielded && nearbyOpp;
+        },
+        execute(hero, game) {
+            return {
+                action: this,
+                entity: hero,
+            }
+        },
+    },
+    RepelFromBase: {
+        ...ActionData_Defaults,
+        label: "Repel",
+        cmd: "SPELL WIND {where}",
+        type: ActionType.Wind,
+        swap: SwapStyle.None,
+        trigger(hero, game) {
+            return game.allyBase.threats.some( monster => {
+                const inRange = (monster.distanceTo(hero) <= Constants.spell.wind.effectRadius);
+                const cantHandleInTime = (monster.remainingTargetCount() > 0);
+                const notShielded = (monster.data.shieldLife === 0);
+
+                const dangerClose = (monster.distanceFromDestination < Constants.playerBase.dangerRadius);
+                const baseEdge = within(
+                    monster.distanceFromDestination,
+                    Constants.playerBase.detectionRadius - Constants.spell.wind.pushDistance * .65,
+                    Constants.playerBase.detectionRadius
+                );
+
+                const withinDistInterval = dangerClose || baseEdge;
+
+                const alreadyPushed = game.heroes.some( hero => {
+                    const inRange = hero.distanceTo(monster) < Constants.spell.wind.effectRadius;
+                    const castingWind = hero.memory.instruction?.action.label === 'Repel';  // TODO I need a better check for this.
+                    return inRange && castingWind;
+                });
+
+                return inRange && cantHandleInTime && notShielded && !alreadyPushed && withinDistInterval;
+            })
+        },
+        execute(hero, game) {
+            return {
+                action: this,
+                where: game.oppBase.position,
+            }
+        },
+    },
+    SweepToOpp: {
+        ...ActionData_Defaults,
+        label: "Push->Opp",
+        cmd: "SPELL WIND {where}",
+        type: ActionType.Wind,
+        swap: SwapStyle.None,
+        trigger(hero, game) {
+            const timeCheck = game.time > 80;
+            const nearby = game.monsters
+                .filter( monster => {
+                    const inRange = monster.distanceTo(hero) < Constants.spell.wind.effectRadius;
+                    const pushable = monster.data.shieldLife === 0;
+                    return inRange && pushable;
+                });
+            return timeCheck && nearby.length >= 3;
+        },
+        execute(hero, game) {
+            return {
+                action: this,
+                where: game.oppBase.position,
+            }
+        }
+    },
+    DistractEnemy: {
+        ...ActionData_Defaults,
+        label: "OccupyOpponent",
+        cmd: "SPELL CONTROL {id} {where}",
+        type: ActionType.Control,
+        swap: SwapStyle.None,
+        trigger(hero, game) {
+            const enoughMp = game.allyBase.mana > 120;
+            const oppNearby = game.oppHeroes.some( opp => {
+                const alreadyTargeted = game.heroes.some( h => h.getActionType(opp) === ActionType.Control );
+                const nearby = opp.distanceTo(hero) < Constants.spell.control.effectiveDistance;
+                const closeToBase = opp.distanceTo(game.allyBase) < Constants.playerBase.sightRadius * 1.5;
+                const isControlled = opp.data.isControlled;
+                return !alreadyTargeted && nearby && closeToBase && !isControlled;
+            });
+            return enoughMp && oppNearby;
+        },
+        execute(hero, game) {
+            const closest = game.oppHeroes.reduce( (a,b) => a.distanceTo(hero) < b.distanceTo(hero) ? a : b );
+            return {
+                action: this,
+                entity: closest,
+                where: Constants.board.center,
+            }
+        }
+    },
+    ProtectOppThreats: <ActionData & {candidateCache: Monster[]}>{
+        ...ActionData_Defaults,
+        label: "Protect->Mon",
+        cmd: "SPELL SHIELD {id}",
+        type: ActionType.Shield,
+        swap: SwapStyle.None,
+        candidateCache: [],
+        trigger(hero, game) {
+            const manaLimit = (game.time < 120) ? 200 : 80;
+            const enoughMp = game.allyBase.mana > manaLimit;
+
+            const candidates = game.monsters.filter( monster => {
+                const alreadyTargeted = game.heroes.some( h => h.getActionType(monster) === ActionType.Shield );
+                const inRange = monster.distanceTo(hero) < Constants.spell.shield.effectiveDistance;
+                const notShielded = monster.data.shieldLife === 0;
+                const threatForOpp = monster.data.threatFor === game.oppBase.id;
+                return !alreadyTargeted && inRange && notShielded && threatForOpp;
+            });
+
+            this.candidateCache = candidates;
+            return enoughMp && candidates.length > 0;
+        },
+        execute(hero, game) {
+            return {
+                action: this,
+                entity: this.candidateCache.shift(),
+                where: game.oppBase.position,
+            }
+        },
+    },
+    SendToOpp: {
+        ...ActionData_Defaults,
+        label: "Send->Opp",
+        cmd: "SPELL CONTROL {id} {where}",
+        type: ActionType.Control,
+        swap: SwapStyle.None,
+        trigger(hero, game) {
+            const manaLimit = (game.time < 120) ? 200 : 80;
+            const enoughMp = game.allyBase.mana > manaLimit;
+            const inWildlands = hero.distanceTo(game.allyBase) > Constants.playerBase.detectionRadius;
+            const someCandidate = game.monsters.some( monster => {
+                const alreadyTargeted = game.heroes.some( h => h.getActionType(monster) === ActionType.Control );
+                const inRange = monster.distanceTo(hero) < Constants.spell.control.effectiveDistance;
+                const inWildlands = monster.distanceTo(game.allyBase) > Constants.playerBase.detectionRadius;
+                const isControlled = monster.data.isControlled;
+                const threatForOpp = monster.data.threatFor === game.oppBase.id;
+                return !alreadyTargeted && inRange && inWildlands && !isControlled && !threatForOpp;
+            });
+            return enoughMp && inWildlands && someCandidate;
+        },
+        execute(hero, game) {
+            const inRange = game.monsters
+                .filter( m => m.distanceTo(hero) < Constants.spell.control.effectiveDistance )
+                .sort( (a,b) => b.distanceTo(hero) - a.distanceTo(hero) );
+            return {
+                action: this,
+                entity: inRange.shift(),
+                where: game.oppBase.position,
+            }
+        },
+    },
+});
+
+
+
+
+
+
+
+
+
+
+interface JobConfig {
+    restingDistCoefficient: number;
+    wanderingDistCoefficient: number;
+    jobs: {
+        firstOrder: ActionData[],
+        secondOrder: ActionData[],
+    }
+}
+
+const Jobs_Default = {
+    firstOrder: [
+        Action.Defend,
+        Action.Hunt,
+        Action.RestAtSentry,
+        Action.DoNothing,
+    ],
+    secondOrder: [
+        SAction.ProtectSelf,
+        SAction.RepelFromBase,
+        SAction.DistractEnemy,
+        SAction.SweepToOpp,
+        SAction.ProtectOppThreats,
+        SAction.SendToOpp,
+    ],
+}
+
+const Job = confirmType<JobConfig>() ({
+    Sentinel: {
+        restingDistCoefficient: 0.7,
+        wanderingDistCoefficient: 1.1,
+        jobs: {
+            firstOrder: [
+                Action.Defend,
+                Action.Hunt,
+                Action.RestAtSentry,
+                Action.DoNothing,
+            ],
+            secondOrder: [
+                // .?
+            ],
+        }
+    },
+    Defender: {
+        restingDistCoefficient: 1.1,
+        wanderingDistCoefficient: 1.5,
+        jobs: Jobs_Default,
+    },
+    Attacker: {
+        restingDistCoefficient: 1.7,
+        wanderingDistCoefficient: 2.25,
+        jobs: Jobs_Default,
+    },
+    Pressurer: {
+        restingDistCoefficient: 3.0,
+        wanderingDistCoefficient: 5.0,
+        jobs: {
+            firstOrder: [
+                // Action.Hunt,
+                Action.RestAtOppBase,
+                Action.DoNothing,
+            ],
+            secondOrder: [
+                SAction.ProtectSelf,
+                SAction.DistractEnemy,
+                SAction.SweepToOpp,
+                SAction.ProtectOppThreats,
+                SAction.SendToOpp,
+            ],
+        }
+    },
+});
+
+
+
+
+
+
+
+
+
+
+interface HeroMemory {
+    heroId: number;
+    role: JobConfig;
+    instruction?: Instruction;
+}
+
+class Hero extends Entity {
+
+    memory: HeroMemory = {
+        heroId: 0,
+        role: Job.Defender,
+        instruction: undefined,
     }
 
-    protected setTravelLocation(location: Point) {
-        if (location.equal(this.data.position))
-            return;
-        this.mem.travelTarget = location;
-        this.mem.idle = false;
+    constructor(game: GameObjectPackage, data: EntityData) {
+        super(game);
+        this.memory.heroId = data.id % Constants.heroesPerPlayer;
+        this.fill(data);
     }
 
+    fill(data: EntityData) {
+        super.fill(data);
+        const mem = this.memory;
+        mem.instruction = Action.DoNothing.execute();
 
-    think(): void {
+        if (game.time < 50)
+            mem.role = (mem.heroId !== 1) ? Job.Attacker : Job.Attacker;
+        else if (game.time < 90)
+            mem.role = (mem.heroId !== 1) ? Job.Attacker : Job.Pressurer;
+        // else if (game.time < 130)
+        //     mem.role = (mem.heroId !== 1) ? Job.Defender : Job.Attacker;
+        else
+            mem.role = (mem.heroId !== 1) ? Job.Defender : Job.Pressurer;
+    }
+
+    getActionType(entity: Entity): ActionType | undefined {
+        const type = this.memory.instruction?.action.type;
+        const targ = this.memory.instruction?.entity;
+        if (type && targ && targ.sameEntity(entity))
+            return type;
+    }
+
+    assignTarget(): void {
+        // Reporting
         const base = this.game.allyBase;
 
-        const threatCount = base.threats.filter( m => m.targetedCount < m.idealTargetCount() ).length;
+        const threatCount = base.threats.filter(m => m.targetedCount < m.idealTargetCount()).length;
         const threatsHandled = (base.untargetedThreats() === false);
         console.error(`${this.nameId()} threats=${(threatsHandled) ? "OK" : threatCount}`);
 
-        if (base.untargetedThreats()) {
-            console.error(`c:Attack`);
-            this.attack();
-        }
-        else {
-            console.error(`c:Explore`);
-            this.explore();
-        }
+        // Assignment
+        const action = this.memory.role.jobs.firstOrder
+            .find( action => action.trigger(this, this.game) );
+        console.assert( Boolean(action), `${this.nameId()} couldn't pick a first order action.`);
 
-        if (this.panicCheck()) {
-            console.error(`c:Wind->GetOut`);
-            this.mem.wind = true;
-            this.mem.noSwap = true;
-            // TODO This needs to be a phase after target designation, otherwise I can't
-            // cull the candidates list by estimated kill time.
-        }
+        this.memory.instruction = action.execute(this, this.game);
+
+        // Signal to other heroes that this monster is being targeted — when *should* this happen?
+        const { entity } = this.memory.instruction;
+        if (entity instanceof Monster)
+            entity.targetedCount++;
     };
 
-    protected panicCheck(): boolean {
-        const { allyBase } = this.game;
-
-        const candidates = allyBase.threats.filter( m => {
-            const inRange = (m.distanceTo(this) <= Constants.spell.wind.effectRadius);
-            const cantHandleInTime = (m.remainingTargetCount() > 0);
-            const notShielded = (m.data.shieldLife === 0);
-            return inRange && cantHandleInTime && notShielded;
-        });
-
-        return candidates.some( m => m.distanceFromDestination < Constants.playerBase.dangerRadius);
-    }
-
-    protected explore() {
-        const { mem } = this;
-
-        this.setTravelLocation(this.getBaseRestingPose());
-        
-        // TODO Wander mode: follow a randomly rotating lead, a carrot.
-
-        const baseDistFactor = (mem.role === AiMode.Attacker) ? 2.25 : 1.5;
-        const maxBaseDistance = Constants.playerBase.sightRadius * baseDistFactor;
-
-        const { knownMonsters } = this.game.allyBase;
-        const nearbyMonsters = knownMonsters
-            .filter( monster => {
-                const distFromBase = monster.data.position.distance(this.game.allyBase.position);
-                const distFromSelf = monster.data.position.distance(this.data.position);
-                const closeToSelf = (distFromSelf < Constants.hero.sightRadius);
-                const farFromBase = (distFromBase > maxBaseDistance);
-                const marked = (monster.targetedCount > 0);
-                return closeToSelf && !farFromBase && !marked;
-            });
-        
-        if (nearbyMonsters.length === 0)
+    considerSpecialAction(): void {
+        if (this.memory.instruction.noOverride)
             return;
 
-        const closest = nearbyMonsters.reduce( (a,b) => {
-            const a_dist = a.data.position.distance(this.data.position);
-            const b_dist = b.data.position.distance(this.data.position);
-            return (a_dist < b_dist) ? a : b;
-        });
+        const action = this.memory.role.jobs.secondOrder
+            .find( action => action.trigger(this, this.game) );
 
-        this.setTarget(closest);
-    }
-
-    protected attack() {
-        const { mem } = this;
-        const base = this.game.allyBase;
-
-        let potentialTargets = base.threats
-            .filter( m => m.targetedCount < m.idealTargetCount() );
-        
-        if (potentialTargets.length === 0)
-            potentialTargets = base.threats;
-        
-        const closest = potentialTargets.reduce( (a,b) => {
-            const a_dist = a.data.position.distance(this.data.position);
-            const b_dist = b.data.position.distance(this.data.position);
-            return (a_dist < b_dist) ? a : b;
-            // v Not ready for prime time.
-            // return (a.remainingTargetCount() > b.remainingTargetCount()) ? a : b;
-        });
-
-        this.setTarget(closest);
+        if (action)
+            this.memory.instruction = action.execute(this, this.game);
     }
 
     swap(other: Hero) {
+        const { instruction: insA } = this.memory;
+        const { instruction: insB } = other.memory;
+
         const otherIsSelf = (this.data.id === other.data.id);
-        const cantSwap = (this.mem.noSwap || other.mem.noSwap);
-        if (otherIsSelf || cantSwap)
+        const noSwapCheck = (ins: Instruction) => (ins.action.swap === SwapStyle.None);
+        if (otherIsSelf || noSwapCheck(insA) || noSwapCheck(insB))
             return;
 
-        const includeSelf = Number(!this.mem.idle);
-        const includeOther= Number(!other.mem.idle);
-        
-        const pose = this.getMoveToPose();
-        const otherPose = other.getMoveToPose();
+        console.assert(Boolean(insA.where) && Boolean(insB.where),
+            `Swap check failed: one of ${this.nameId()} c:${insA.action.label} | ${other.nameId()} c:${insB.action.label} did not have a movement point. Was this on purpose?`);
 
-        const curA = this.distanceTo(pose) * includeSelf;
-        const curB = other.distanceTo(otherPose) * includeOther;
+        // If both instructions 'exclude distance', then neither do; they're the same priority-level action.
+        const forceInclude = insA.action.swap === SwapStyle.ExcludeDistance && insA.action.swap === insB.action.swap;
 
-        const swapA = this.distanceTo(otherPose) * includeSelf;
-        const swapB = other.distanceTo(pose) * includeOther;
+        const includeDistCheck = (ins: Instruction) => (ins.action.swap === SwapStyle.Full || forceInclude);
+        const includeDistA = Number(includeDistCheck(insA));
+        const includeDistB = Number(includeDistCheck(insB));
 
-        const distCur  = curA  + curB;
+        // Calc scenario distances to compare
+        const poseA = insA.entity?.data.position || insA.where;
+        const poseB = insB.entity?.data.position || insB.where;
+
+        const curA = this.distanceTo(poseA) * includeDistA;
+        const curB = other.distanceTo(poseB) * includeDistB;
+        const distCur = curA + curB;
+
+        const swapA = this.distanceTo(poseB) * includeDistA;
+        const swapB = other.distanceTo(poseA) * includeDistB;
         const distSwap = swapA + swapB;
 
-        // console.error(`swap? ${this.data.id}<->${other.data.id} cur=${distCur.toFixed(0)} swp=${distSwap.toFixed(0)}`);
-
         if (distSwap < distCur) {
-            console.error(`${this.nameId()} <-> ${other.nameId()}`);
-            // console.error(`: ${this.nameId()} idle=${1-includeSelf} cur=${curA.toFixed(0)} swp=${swapA.toFixed(0)}`);
-            // console.error(`: ${other.nameId()} idle=${1-includeOther} cur=${curB.toFixed(0)} swp=${swapB.toFixed(0)}`);
+            console.error(`${this.nameId()} <-> ${other.nameId()} : ${distCur.toFixed(0)} > ${distSwap.toFixed(0)}`);
+            // console.error(`: ${this.nameId()} idle=${1-includeDistA} cur=${curA.toFixed(0)} swp=${swapA.toFixed(0)}`);
+            // console.error(`: ${other.nameId()} idle=${1-includeDistB} cur=${curB.toFixed(0)} swp=${swapB.toFixed(0)}`);
             // console.error(`: totals        cur=${distCur.toFixed(0)} swp=${distSwap.toFixed(0)}`);
-            const tmp = this.mem;
-            this.mem = other.mem;
-            other.mem = tmp;
-        }
-    }
 
-    /** Called when Cmd -> "Move" */
-    getMoveToPose(post?: boolean): Point {
-        const { mem } = this;
-
-        function log(msg: string) {
-            if (post)
-                console.error(msg);
-        }
-
-        if (mem.target) {
-            log(`${this.nameId()} -> ${mem.target.nameId()}`);
-            return this.getAttackPose(mem.target);
-        }
-        else if (mem.travelTarget) {
-            log(`${this.nameId()} -> Resting Pose ${mem.travelTarget.trunc().toLog()}`);
-            return mem.travelTarget;
-        }
-        else {
-            log(`${this.nameId()} -> None`);
-            return this.data.position;
+            [ this.memory, other.memory ] = [ other.memory, this.memory ];
+            this.memory.instruction = this.memory.instruction.action.swapReexecute(this, this.memory.instruction, this.game);
+            other.memory.instruction = other.memory.instruction.action.swapReexecute(other, other.memory.instruction, other.game);
         }
     }
 
     getCommand(): string {
-        const canCast = this.game.allyBase.mana >= 10;
+        const { entity, message } = this.memory.instruction
 
-        if (canCast && this.data.shieldLife === 0 && this.game.oppHeroes.some( o => o.distanceTo(this) <= Constants.spell.control.effectiveDistance ))
-            return `SPELL SHIELD ${this.data.id}`;
+        const targetStr = entity && ` -> ${entity.nameId()}` || '';
+        console.error(`${this.nameId()} c:${this.memory.instruction.action.label}${targetStr}`);
 
-        if (canCast && this.mem.wind)
-            return `SPELL WIND ${this.game.oppBase.position.toString()}`;
-
-        const goal = this.getMoveToPose(true);
-        return `MOVE ${goal.trunc().toString()}`;
+        return `${instructionToCommand(this.memory.instruction)} ${message ?? ''}`;
     }
 
 }
@@ -788,14 +1150,17 @@ class Base {
     get threats() { return this._threats; }
     private _threats: Monster[] = [];
 
+    get enemies() { return this._knownEnemies; }
+    private _knownEnemies: OppHero[] = [];
+
     constructor(playerId: PlayerTarget, position: Point) {
         this.id = playerId;
         this.position = position;
         this.isPlayer1 = position.equal(Point.Zero);
 
-        // Build sentry poses
+        // Build sentry pose slices
         const { sin, cos } = Math;
-        const numPoints = Constants.heroesPerPlayer + 1;    // add angle=0
+        const numPoints = Constants.heroesPerPlayer + 1 + 2;    // add angle=0 + a few others ig
         const eta = Math.PI / 2.0;
         const angleSegment = eta / numPoints;
 
@@ -814,11 +1179,20 @@ class Base {
         this.mana = parseInt(inputs[1]);
     }
 
-    updateEntities(monsters: Monster[]): void {
+    updateEntities(monsters: Monster[], enemies: OppHero[]): void {
         this._knownMonsters = monsters;
         this._threats = this._knownMonsters
             .filter(monster => monster.data.threatFor === this.id)
             .sort((a, b) => a.idealTargetCount() - b.idealTargetCount());
+        this._knownEnemies = enemies;
+
+        // Report
+        console.error(this.toString());
+    }
+
+    updateJobs(): void {
+        console.error(`Base.updateJobs() not yet implemented.`)
+        // TODO This would be where Base, by royal decree, requests certain jobs (AiModes) be taken up by its heroes.
     }
 
     untargetedThreats(): boolean {
@@ -834,7 +1208,7 @@ class Base {
     }
 
     toString(): string {
-        return `${this.nameId()} ${this.position.toLog()} ${this.hp}hp ${this.mana}mp seen=${this._knownMonsters.length} threats=${this._threats.length}`;
+        return `${this.nameId()} ${this.position.toLog()} ${this.hp}hp ${this.mana}mp seen=${this._knownMonsters.length} threats=${this._threats.length} opps=${this._knownEnemies.length}`;
     }
 }
 
@@ -847,10 +1221,20 @@ class Base {
 
 
 
+interface GameObjectPackage {
+    allyBase: Base;
+    oppBase: Base;
+    time: number;
+    monsters: Monster[];
+    heroes: Hero[];
+    oppHeroes: OppHero[];
+}
+
 // game setup
 const game: GameObjectPackage = {
     allyBase: new Base(PlayerTarget.Allied, Constants.basePos),
     oppBase: new Base(PlayerTarget.Opponent, Constants.basePos.subtract(Constants.board.dimensions).abs()),
+    time: -1,
 
     monsters: [],
     heroes: [],
@@ -859,7 +1243,7 @@ const game: GameObjectPackage = {
 
 let seen_monsters: Monster[] = [];
 let seen_enemies: OppHero[] = [];
-const known_heroes: Record<number, Hero> = { };
+const known_heroes: Record<number, Hero> = {};
 
 // game loop
 while (true) {
@@ -867,7 +1251,9 @@ while (true) {
     const entityData: EntityData[] = [];
     seen_monsters = [];
     seen_enemies = [];
-    
+
+    game.time++;
+
     game.allyBase.readData();
     game.oppBase.readData();
 
@@ -899,69 +1285,22 @@ while (true) {
     game.heroes = Object.values(known_heroes);
     game.oppHeroes = seen_enemies;
 
-    game.allyBase.updateEntities(seen_monsters);
-    console.error(game.allyBase.toString());
-    
-    for (let hero of Object.values(known_heroes))
-        hero.think();
+    game.allyBase.updateEntities(seen_monsters, seen_enemies);
 
-    // TODO Travel distance minimizing — Heroes should trade objectives.
-    for (let k = 0; k < 2; k++) {
-        for (const heroA of Object.values(known_heroes)) {
-            for (const heroB of Object.values(known_heroes)) {
-                heroA.swap(heroB);
-            }
-        }
-    }
+    // Assign targets/jobs to each hero
+    for (const hero of game.heroes)
+        hero.assignTarget();
 
-    // Reporting
-    for (let monster of seen_monsters) {
-        // if (monster.targetedCount > 0)
-        //     console.error(`${monster.nameId()} tc=${monster.targetedCount}`);
-    }
+    // Minimize travel distance among assigned targets. 
+    for (const heroA of Object.values(known_heroes))
+        for (const heroB of Object.values(known_heroes))
+            heroA.swap(heroB);
+
+    // Allow heroes to override their action under special circumstances
+    for (const hero of game.heroes)
+        hero.considerSpecialAction();
 
     // Yield final hero commands
     for (let hero of Object.values(known_heroes))
-        console.log( hero.getCommand() );
+        console.log(hero.getCommand());
 }
-
-
-/*
-
-Okay, I think I need more food.
-I also need to work real quick.
-I can focus on this after.
-
-I need to, in the mean time, come up with a more formal strategy for handling
-hero responsibilies.
-
-I need to know if they will WAIT or FORAGE or DEFEND or GOALIE or any others I come up with.
-
-GOALIE is the reason. Being able to send a guy into prime base position for shoving
-all the boys out is important. As it is, they do try, but they're keyed in for being
-on top of the threats they're worried about, so they can't reach with WIND the snakes
-coming in from the other side.
-
-I should also come up with a formal strategy for both DEFEND, EXPLORE and ATTACK roles.
-Like, when in DEFEND, what takes priority? WIND? CONTROL? When? Why? Which if both?
-This is actually an easy question, I guess. CONTROL isn't useful out of the base,
-and WIND definitely takes priority over regular attacking.
-
-Maybe Base can have a threat threshold of like 3 or something, and if threats goes
-above that, one hero, the closest one, will be picked to be goalie.
-
-I need then a way to describe an action.
-{
-    where: Point,
-    get distance() { ... }  // IDLE/WANDER has an effective distance of 0
-    why: Forage | Defend | PushAway | SendToOpponent,
-    priority: number,
-}
-This can then be converted into a proper string later.
-Priority is just for overiding purposes. A 2 can't assume the place of a 5, for instance.
-
-[ ] Implement instruction datatype
-[ ] Cull unnecessary fields (Hero); a lot of those (some of) are messages between functions.
-[ ] If an OppHero is a known entity, I need to cast shield right away.
-
-*/
