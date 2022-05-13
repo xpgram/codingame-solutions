@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <cmath>
 
 using namespace std;
 
@@ -96,6 +97,32 @@ public:
       return Point(f(x), f(y));
     }
 
+    Point rotateByComplex(Point vec) const {
+        vec = vec.fastUnitVector();
+        return Point(
+            (x * vec.x) - (y * vec.y),
+            (x * vec.y) + (y * vec.x)
+        );
+    }
+
+    /** Yields a fast approximation of this Point's unit vector; returns a new Point.  
+     * The shape this creates is an octagon inscribed in the ideal circle.
+     * @author Nick Vogt */
+    Point fastUnitVector() const {
+        // 0.29289 ~= 1 - 1/sqrt(2)
+        // 1.29289 ~= 2 - 1/sqrt(2)
+
+        double ax = x*(x >= 0) + -x*(x < 0);            // absolute coords
+        double ay = y*(y >= 0) + -y*(y < 0);
+        double ratio = 1 / ( x*(x >= y) + y*(x < y));   // max(x, y)
+        ratio = ratio * (1.29289 - (ax + ay) * ratio * 0.29289);    // ..? some trigonometry
+
+        return Point(
+            x * ratio,
+            y * ratio
+        );
+    }
+
     operator string() const {
         stringstream s;
         s << int(x) << " " << int(y);
@@ -161,7 +188,7 @@ class Polygon {
 public:
 
     Polygon(const vector<Point> &points) : vertices(points) { }
-    
+
 
     /** Returns a list of <p,i> pairs where p is the intersection between the line A→B
      * and a side of this polygon, and i is the index of I for a polygon side described
@@ -295,8 +322,6 @@ int main()
         Point(0,height)}
     );
 
-    // TODO Finish refactor to use Polygon
-
     int n; // maximum number of turns before game over.
     cin >> n; cin.ignore();
     cerr << "max turns = " << n << endl;
@@ -315,8 +340,12 @@ int main()
         lastPos = pos;
 
         // Reflect about the search space
-        pos.x = clamp(search.right  - pos.x + search.left, search.left, search.right);
-        pos.y = clamp(search.bottom - pos.y + search.top , search.top , search.bottom);
+        Point search_center = search.averageVertex();
+        pos = search_center - (pos - search_center);
+
+        pos = pos.apply(floor);
+        pos.x = clamp(pos.x, 0, width);
+        pos.y = clamp(pos.y, 0, height);
 
         cerr << string(lastPos) << " -> " << string(pos) << endl;
         cerr << string(search) << endl;
@@ -325,8 +354,20 @@ int main()
         cin >> bomb_clue; cin.ignore();
 
         // Narrow the search space about the reflection line
+ 
+        Point mid = ((pos - lastPos) / 2.0 + lastPos).apply(floor);
+        Point midB = (pos - mid).rotateByComplex(Point(0,1));   // mid→midB is perpendicular to pos→lastPos
 
-        auto intersects = getIntersectionPoints(pos, lastPos, search);
+        auto shapes = search.slice(mid, midB);
+
+        // TODO Finish refactor
+        // 'WARM' is the shape with the closest average vector
+        // 'SAME' might have to be a special case. I don't know what to do there.
+        //   Maybe a rectangle polygon which surrounds the midline?
+        //   Should be a niche scenario, in any case.
+        // TODO If shapes.size() < 2, what do? we just continue, I guess.
+        //   The algorithm is likely to get stuck in this case... well it could, but
+        //   it probably happened because of the clamping, so perhaps not.
 
         cerr << "intersects size=" << intersects.size() << endl;
         // for (const auto& p : intersects)
