@@ -97,6 +97,14 @@ public:
       return Point(f(x), f(y));
     }
 
+    double magnitude() const {
+        return sqrt(x*x + y*y);
+    }
+
+    double distanceTo(const Point &other) const {
+        return (other - *this).magnitude();
+    }
+
     Point rotateByComplex(Point vec) const {
         vec = vec.fastUnitVector();
         return Point(
@@ -350,41 +358,39 @@ int main()
         cerr << string(lastPos) << " -> " << string(pos) << endl;
         cerr << string(search) << endl;
 
+        // Yield move instruction
         cout << int(pos.x) << " " << int(pos.y) << endl;
+
+        // Recieve next clue
         cin >> bomb_clue; cin.ignore();
 
+        if (bomb_clue == "SAME") {
+            cerr << "Clue was 'SAME'; I don't have a protocol for this." << endl;
+            continue;
+        }
+
         // Narrow the search space about the reflection line
- 
         Point mid = ((pos - lastPos) / 2.0 + lastPos).apply(floor);
         Point midB = (pos - mid).rotateByComplex(Point(0,1));   // mid→midB is perpendicular to pos→lastPos
 
         auto shapes = search.slice(mid, midB);
 
-        // TODO Finish refactor
-        // 'WARM' is the shape with the closest average vector
-        // 'SAME' might have to be a special case. I don't know what to do there.
-        //   Maybe a rectangle polygon which surrounds the midline?
-        //   Should be a niche scenario, in any case.
-        // TODO If shapes.size() < 2, what do? we just continue, I guess.
-        //   The algorithm is likely to get stuck in this case... well it could, but
-        //   it probably happened because of the clamping, so perhaps not.
+        // Something happened to the midline — wasn't sufficiently through the search polygon
+        if (shapes.size() < 2)
+            continue;
 
-        cerr << "intersects size=" << intersects.size() << endl;
-        // for (const auto& p : intersects)
-        for (int i = 0; i < intersects.size(); ++i)
-            cerr << i << ": " << string(intersects[i]) << endl;
+        Polygon warm = shapes[0];
+        Polygon cold = shapes[1];
 
-        if (intersects.size() != 2) {
-            cerr << "This is, uh... empty." << endl;
-            throw 1;
+        if (warm.averageVertex().distanceTo(pos) > cold.averageVertex().distanceTo(pos)) {
+            cold = shapes[0];
+            warm = shapes[1];
         }
 
-        Point a = intersects[0];
-        Point b = intersects[1];
+        search = (bomb_clue == "WARMER") ? warm : cold;
 
-        search.left = clamp(min(int(a.x), int(b.x)), search.left, search.right);
-        search.right = clamp(max(int(a.x), int(b.x)), search.left, search.right);
-        search.top = clamp(min(int(a.y), int(b.y)), search.top, search.bottom);
-        search.bottom = clamp(max(int(a.y), int(b.y)), search.top, search.bottom);
+
+        // TODO
+        // All right. Time to see it break.
     }
 }
