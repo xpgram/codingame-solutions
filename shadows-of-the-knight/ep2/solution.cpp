@@ -50,6 +50,8 @@ bounds of the building).
 */
 
 bool within(double n, double min, double max) {
+    if (min > max)
+        tie(min,max) = make_tuple(max,min);
     return (min <= n && n <= max);
 }
 
@@ -161,14 +163,29 @@ public:
         Point i;
         i.x = (other.lift - lift) / (slope - other.slope);
         i.y = slope*i.x + lift;
+        double c = other.slope*i.x + other.lift;
+
+        // The solution for x when the lines are paired: e.g, ax+b = cx+d
+        // This does not work for vertical lines, so I need something else.
+        //
+        // I mean, perhaps I could notice that they're vertical, switch
+        // x and y temporarily, do the calc, find the intersect, then swap
+        // its x and y again before returning.
+        // But what if the swap makes the *other* line vertical?
+
+        // I'm gonna have to learn linear algebra.
+        // I need to be able to solve a 2x2 system, where []t = []u
+        // At least we know.
+        // If I remember, this is actually really simple.
+        
         return i;
     }
 
     bool pointInSegment(const Point &P) const {
-        Point vB = B - A;
-        Point vP = P - A;
+        Point vB = (B - A);
+        Point vP = (P - A);
         bool sameSlope = vB.slope() == vP.slope();
-        bool containedByB = (vP.x <= vB.x && vP.y <= vB.y);
+        bool containedByB = within(vP.x, 0, vB.x) && within(vP.y, 0, vB.y);
         return sameSlope && containedByB;
     }
 
@@ -213,6 +230,8 @@ public:
 
         Line line_cast(A,B);
 
+        cerr << "getting intersections" << endl;
+
         // Find intersections
         for (int i = 0; i < vertices.size(); ++i) {
             int j = (i + 1) % vertices.size();
@@ -220,18 +239,31 @@ public:
             Point I = *(vertices.begin() + i);
             Point J = *(vertices.begin() + j);
 
+            cerr << "checking side " << string(I) << " -> " << string(J);
+
             Line poly_side(I,J);
 
-            if (poly_side.parallel(line_cast))
+            if (poly_side.parallel(line_cast)) {
+                cerr << " : parallel; skipping" << endl;
                 continue;
+            }
 
             Point intersect = poly_side.intersection(line_cast);
+            cerr << " X " << string(intersect);
 
-            if (intersect == J)     // intersection occurs over a polySide endpoint,
+            if (intersect == J) {   // intersection occurs over a polySide endpoint,
+                cerr << " : potential duplicate; skipping" << endl;
                 continue;           // so only accept one endpoint to exclude duplicates.
+            }
 
-            if (poly_side.pointInSegment(intersect))
+            if (poly_side.pointInSegment(intersect)) {
                 intersects.push_back(pair(intersect, i));
+                cerr << " : accepted";
+            }
+            else
+                cerr << " : not in range; skipping";
+
+            cerr << endl;
         }
 
         // Debug report
@@ -251,8 +283,13 @@ public:
         if (intersects.size() < 2)
             return vector<Polygon>( {*this} );
 
-        if (intersects.size() > 2)
+        if (intersects.size() > 2) {
+            cerr << endl;
+            for (auto &p : intersects)
+                cerr << string(p.first) << ", ";
+            cerr << endl;
             throw invalid_argument("This shouldn't happen. Intersections through a convex(?) shape were > 2.");
+        }
 
         // Setup
         Point pA = intersects[0].first;
@@ -267,11 +304,11 @@ public:
         auto itB = begin + max(idxA, idxB);
 
         // All vertices pA→pB
-        vector<Point> shapeA(itA + 1, itB);
+        vector<Point> shapeA(itA, itB);
 
         // All vertices pB→pA
         vector<Point> shapeB(begin, itA);
-        shapeB.insert(shapeB.end(), itB + 1, end);
+        shapeB.insert(shapeB.end(), itB, end);
 
         // Include {pA,pB} in each new shape
         shapeA.insert(shapeA.end(), {pA, pB});
@@ -324,9 +361,9 @@ int main()
     cin >> width >> height; cin.ignore();
 
     Polygon search({
-        Point(),
+        Point(1,0),
         Point(width,0),
-        Point(width, height),
+        Point(width-1, height),
         Point(0,height)}
     );
 
@@ -352,11 +389,12 @@ int main()
         pos = search_center - (pos - search_center);
 
         pos = pos.apply(floor);
-        pos.x = clamp(pos.x, 0, width);
-        pos.y = clamp(pos.y, 0, height);
+        pos.x = clamp(pos.x, 0, width-1);
+        pos.y = clamp(pos.y, 0, height-1);
 
-        cerr << string(lastPos) << " -> " << string(pos) << endl;
-        cerr << string(search) << endl;
+        cerr << "search: " << string(search) << endl;
+        cerr << "search pivot: " << string(search_center) << endl;
+        cerr << "move: " << string(lastPos) << " -> " << string(pos) << endl;
 
         // Yield move instruction
         cout << int(pos.x) << " " << int(pos.y) << endl;
@@ -371,7 +409,12 @@ int main()
 
         // Narrow the search space about the reflection line
         Point mid = ((pos - lastPos) / 2.0 + lastPos).apply(floor);
-        Point midB = (pos - mid).rotateByComplex(Point(0,1));   // mid→midB is perpendicular to pos→lastPos
+        Point midB = (pos - mid).rotateByComplex(Point(0,1)) + mid;   // mid→midB is perpendicular to pos→lastPos
+
+        cerr << "last = " << string(lastPos) << " -> " << string(pos) << endl;
+        cerr << "lastline = " << string(Line(lastPos, pos)) << endl;
+        cerr << "midpoint = " << string(mid) << " ( & " << string(midB) << " )" << endl;
+        cerr << "midline = " << string(Line(mid, midB)) << endl;
 
         auto shapes = search.slice(mid, midB);
 
@@ -387,10 +430,18 @@ int main()
             warm = shapes[1];
         }
 
-        search = (bomb_clue == "WARMER") ? warm : cold;
+        cerr << "warm = " << string(warm) << endl;
+        cerr << "cold = " << string(cold) << endl;
 
+        if (bomb_clue == "WARMER") {
+            search = warm;
+            cerr << "chose warm" << endl;
+        }
+        else {
+            search = cold;
+            cerr << "chose cold" << endl;
+        };
 
-        // TODO
-        // All right. Time to see it break.
+        cerr << endl; // newline to separate search-narrow alg from next move calc
     }
 }
