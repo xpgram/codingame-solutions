@@ -160,25 +160,33 @@ public:
         if (slope == other.slope)
             throw domain_error("Parallel lines: bad input.");
 
-        Point i;
-        i.x = (other.lift - lift) / (slope - other.slope);
-        i.y = slope*i.x + lift;
-        double c = other.slope*i.x + other.lift;
+        // Point i;
+        // i.x = (other.lift - lift) / (slope - other.slope);
+        // i.y = slope*i.x + lift;
+        // double c = other.slope*i.x + other.lift;
 
-        // The solution for x when the lines are paired: e.g, ax+b = cx+d
-        // This does not work for vertical lines, so I need something else.
-        //
-        // I mean, perhaps I could notice that they're vertical, switch
-        // x and y temporarily, do the calc, find the intersect, then swap
-        // its x and y again before returning.
-        // But what if the swap makes the *other* line vertical?
+        // Alt method
 
-        // I'm gonna have to learn linear algebra.
-        // I need to be able to solve a 2x2 system, where []t = []u
-        // At least we know.
-        // If I remember, this is actually really simple.
+        vector<double> mA({ -slope*A.x, A.y, lift });
+        vector<double> mB({ -other.slope*other.A.x, other.A.y, other.lift });
+
+        // This is the condensed method for solving a 2x2 linear system.
+
+        // Put 1 in [0,0]
+        mA[1] /= mA[0];   // I'm getting junk because mA[0] = 0
+        mA[2] /= mA[0];   // *sigh*
+
+        // Put 0 in [0,1]
+        mB[1] -= mA[1] * mB[0];
+        mB[2] -= mA[2] * mB[0];
+
+        // Put 1 in [1,1]
+        mB[2] /= mB[1];
+
+        // Put x in [2,0]
+        mA[2] -= mB[2] * mA[1];
         
-        return i;
+        return Point(mA[2], mB[2]);
     }
 
     bool pointInSegment(const Point &P) const {
@@ -361,10 +369,10 @@ int main()
     cin >> width >> height; cin.ignore();
 
     Polygon search({
-        Point(1,0),
-        Point(width,0),
-        Point(width-1, height),
-        Point(0,height)}
+        Point(),
+        Point(width, 0),
+        Point(width, height),
+        Point(0, height)}
     );
 
     int n; // maximum number of turns before game over.
