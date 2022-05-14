@@ -175,6 +175,14 @@ public:
         // Put 1 in [0,0]
         mA[1] /= mA[0];   // I'm getting junk because mA[0] = 0
         mA[2] /= mA[0];   // *sigh*
+                          // I'm going home, but I think if A and B both
+                          // have [0] = 0, then x just = 0.
+                          // Oh..
+                          // Actually, am I screwing up?
+                          // I think A.y should be 1, and A.x can just be slope.
+                          // What if slope is inf because the line is vertical?
+                          // I haven't actually solved that problem, I guess.
+                          // I'll read more.
 
         // Put 0 in [0,1]
         mB[1] -= mA[1] * mB[0];
