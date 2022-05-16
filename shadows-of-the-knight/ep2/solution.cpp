@@ -261,6 +261,16 @@ public:
 
         cerr << "getting intersections" << endl;
 
+        // TODO I gathered the wrong shapes.
+        // For
+        // A  B
+        // C  D
+        // E  F
+        // I returned B F C D   ← ??? BFD describe a line, not a polygon
+        //        and A E C D         Same for A E C
+        // instead of A B C D   ← Squares
+        //        and F E C D
+
         // Find intersections
         for (int i = 0; i < vertices.size(); ++i) {
             int j = (i + 1) % vertices.size();
