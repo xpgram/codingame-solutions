@@ -55,7 +55,7 @@ public:
     return Point(x/n, y/n);
   }
 
-  Point apply(int f(int)) const {
+  Point apply(double f(double)) const {
     return Point(f(x), f(y));
   }
 
