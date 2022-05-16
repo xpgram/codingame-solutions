@@ -61,83 +61,107 @@ double clamp(double n, double min, double max) {
 
 class Point {
 public:
-    double x, y;
+  double x;
+  double y;
 
-    Point() : x(0), y(0) { }
-    Point(double x, double y) : x(x), y(y) { }
-    Point(const Point &p) : x(p.x), y(p.y) { }
+  Point() : x(0), y(0) {}
+  Point(double x, double y) : x(x), y(y) {}
+  Point(const Point &p) : x(p.x), y(p.y) {}
 
-    double slope() const {
-        return (x != 0) ? y / x : 0;
-    }
+  string logStr() const {
+    stringstream s;
+    s << fixed << setprecision(2)
+      << "(" << x << " " << y << ")";
+    return s.str();
+  }
 
-    bool operator==(const Point &p) const {
-        return x == p.x && y == p.y;
-    }
+  operator string() const {
+    stringstream s;
+    s << int(x) << " " << int(y);
+    return s.str();
+  }
 
-    Point operator+(const Point &p) const {
-      return Point(x + p.x, y + p.y);
-    }
+  bool operator==(const Point &other) const {
+    return (x == other.x && y == other.y);
+  }
 
-    Point operator-() const {
-      return Point(-x,-y);
-    }
+  bool operator!=(const Point &other) const {
+    return (x != other.x || y != other.y);
+  }
 
-    Point operator-(const Point &p) const {
-      return -p + *this;
-    }
+  Point operator+(const Point &other) const {
+    return Point(x + other.x, y + other.y);
+  }
 
-    Point operator*(double n) const {
-      return Point(x*n, y*n);
-    }
+  Point operator-() const {
+    return Point(-x, -y);
+  }
 
-    Point operator/(double n) const {
-      return Point(x/n, y/n);
-    }
+  Point operator-(const Point &other) const {
+    return -other + *this;
+  }
 
-    Point apply(double f(double)) const {
-      return Point(f(x), f(y));
-    }
+  Point operator*(double n) const {
+    return Point(x*n, y*n);
+  }
 
-    double magnitude() const {
-        return sqrt(x*x + y*y);
-    }
+  Point operator/(double n) const {
+    return Point(x/n, y/n);
+  }
 
-    double distanceTo(const Point &other) const {
-        return (other - *this).magnitude();
-    }
+  Point apply(int f(int)) const {
+    return Point(f(x), f(y));
+  }
 
-    Point rotateByComplex(Point vec) const {
-        vec = vec.fastUnitVector();
-        return Point(
-            (x * vec.x) - (y * vec.y),
-            (x * vec.y) + (y * vec.x)
-        );
-    }
+  double slope() const {
+    return (x != 0) ? y / x : 0;
+  }
 
-    /** Yields a fast approximation of this Point's unit vector; returns a new Point.  
-     * The shape this creates is an octagon inscribed in the ideal circle.
-     * @author Nick Vogt */
-    Point fastUnitVector() const {
-        // 0.29289 ~= 1 - 1/sqrt(2)
-        // 1.29289 ~= 2 - 1/sqrt(2)
+  double magnitude() const {
+    return sqrt(x*x + y*y);
+  }
 
-        double ax = x*(x >= 0) + -x*(x < 0);            // absolute coords
-        double ay = y*(y >= 0) + -y*(y < 0);
-        double ratio = 1 / ( x*(x >= y) + y*(x < y));   // max(x, y)
-        ratio = ratio * (1.29289 - (ax + ay) * ratio * 0.29289);    // ..? some trigonometry
+  double manhattanMagnitude() const {
+    return abs(x) + abs(y);
+  }
 
-        return Point(
-            x * ratio,
-            y * ratio
-        );
-    }
+  Point unitVector() const {
+    return (*this) / magnitude();
+  }
 
-    operator string() const {
-        stringstream s;
-        s << int(x) << " " << int(y);
-        return s.str();
-    }
+  /** Yields a fast approximation of this Point's unit vector; returns a new Point.  
+   * The shape this creates is an octagon inscribed in the ideal circle.
+   * @author Nick Vogt */
+  Point fastUnitVector() const {
+    // 0.29289 ~= 1 - 1/sqrt(2)
+    // 1.29289 ~= 2 - 1/sqrt(2)
+
+    double ax = x*(x >= 0) + -x*(x < 0);            // absolute coords
+    double ay = y*(y >= 0) + -y*(y < 0);
+    double ratio = 1 / ( x*(x >= y) + y*(x < y));   // 1 / max(x, y)
+    ratio = ratio * (1.29289 - (ax + ay) * ratio * 0.29289);
+      // some trigonometry involving how diagonally-pointed the vector is
+
+    return Point(x * ratio, y * ratio);
+  }
+
+  /** Rotates this vector by the given vector's implicit-angle from the +x-axis. */
+  Point rotateByComplex(Point vec) const {
+    vec = vec.unitVector();
+    return Point(
+      (x * vec.x) - (y * vec.y),
+      (x * vec.y) + (y * vec.x)
+    );
+  }
+
+  double crossZ(const Point &other) const {
+    return x*other.y - y*other.x;
+  }
+
+  double distanceTo(const Point &other) const {
+    return (other - *this).magnitude();
+  }
+
 };
 
 class Line {
@@ -154,47 +178,36 @@ public:
       vec(B-A),
       slope(vec.slope()),
       lift(-slope*A.x + A.y)
-    { }
+    {
+        if (vec.manhattanMagnitude() == 0.0) {
+            stringstream s;
+            s << "The points given do not describe a valid line: A == B == " << A.logStr();
+            throw invalid_argument(s.str());
+        }
+    }
 
+    /** Returns a Point object describing where these two lines intersect.
+     * If these lines do not, throws an error. */
     Point intersection(const Line &other) const {
-        if (slope == other.slope)
-            throw domain_error("Parallel lines: bad input.");
+        // This method uses vector cross-products to determine a ratio for line A (this)
+        // by which its travel vector should be multiplied to arrive at the intersection
+        // point.
 
-        // Point i;
-        // i.x = (other.lift - lift) / (slope - other.slope);
-        // i.y = slope*i.x + lift;
-        // double c = other.slope*i.x + other.lift;
+        Point vecA = vec;
+        Point vecB = other.vec;
+        Point vecC = A - other.A;   // A vector from this to other's origin point.
 
-        // Alt method
-
-        vector<double> mA({ -slope*A.x, A.y, lift });
-        vector<double> mB({ -other.slope*other.A.x, other.A.y, other.lift });
-
-        // This is the condensed method for solving a 2x2 linear system.
-
-        // Put 1 in [0,0]
-        mA[1] /= mA[0];   // I'm getting junk because mA[0] = 0
-        mA[2] /= mA[0];   // *sigh*
-                          // I'm going home, but I think if A and B both
-                          // have [0] = 0, then x just = 0.
-                          // Oh..
-                          // Actually, am I screwing up?
-                          // I think A.y should be 1, and A.x can just be slope.
-                          // What if slope is inf because the line is vertical?
-                          // I haven't actually solved that problem, I guess.
-                          // I'll read more.
-
-        // Put 0 in [0,1]
-        mB[1] -= mA[1] * mB[0];
-        mB[2] -= mA[2] * mB[0];
-
-        // Put 1 in [1,1]
-        mB[2] /= mB[1];
-
-        // Put x in [2,0]
-        mA[2] -= mB[2] * mA[1];
+        double denom = vecA.crossZ(vecB);
         
-        return Point(mA[2], mB[2]);
+        if (denom == 0.0)
+            throw domain_error("These lines are parallel or one's definition vector has no length.");
+
+        // double s = vecA.cross(vecC) / denom;
+        double t = vecB.crossZ(vecC) / denom;
+
+        // The lines' travel vectors themselves intersect if s && t are each within the interval [0,1]
+
+        return A + vec*t;
     }
 
     bool pointInSegment(const Point &P) const {

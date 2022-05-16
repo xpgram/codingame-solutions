@@ -14,10 +14,16 @@ public:
   Point(double x, double y) : x(x), y(y) {}
   Point(const Point &p) : x(p.x), y(p.y) {}
 
-  operator string() const {
+  string logStr() const {
     stringstream s;
     s << fixed << setprecision(2)
-      << x << " " << y;
+      << "(" << x << " " << y << ")";
+    return s.str();
+  }
+
+  operator string() const {
+    stringstream s;
+    s << int(x) << " " << int(y);
     return s.str();
   }
 
@@ -61,17 +67,12 @@ public:
     return sqrt(x*x + y*y);
   }
 
-  Point unitVector() const {
-    return (*this) / magnitude();
+  double manhattanMagnitude() const {
+    return abs(x) + abs(y);
   }
 
-  /** Rotates this vector by the given vector's implicit-angle from the +x-axis. */
-  Point rotateByComplex(Point vec) const {
-    vec = vec.unitVector();
-    return Point(
-      (x * vec.x) - (y * vec.y),
-      (x * vec.y) + (y * vec.x)
-    );
+  Point unitVector() const {
+    return (*this) / magnitude();
   }
 
   /** Yields a fast approximation of this Point's unit vector; returns a new Point.  
@@ -88,6 +89,19 @@ public:
       // some trigonometry involving how diagonally-pointed the vector is
 
     return Point(x * ratio, y * ratio);
+  }
+
+  /** Rotates this vector by the given vector's implicit-angle from the +x-axis. */
+  Point rotateByComplex(Point vec) const {
+    vec = vec.unitVector();
+    return Point(
+      (x * vec.x) - (y * vec.y),
+      (x * vec.y) + (y * vec.x)
+    );
+  }
+
+  double crossZ(const Point &other) const {
+    return x*other.y - y*other.x;
   }
 
   double distanceTo(const Point &other) const {
