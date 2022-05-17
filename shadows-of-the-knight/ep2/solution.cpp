@@ -457,6 +457,10 @@ int main()
             // Funnily, Batman does narrow in on his own.
             // I think this is because of the bounds of the building, though;
             // like, he can't always jump to where he wants to.
+            
+            // Probably what I should do is slice about the midline, and then
+            // position batman on next jump at the end of that midline, so he
+            // can finish up in linear fashion.
         }
 
         // Narrow the search space about the reflection line
