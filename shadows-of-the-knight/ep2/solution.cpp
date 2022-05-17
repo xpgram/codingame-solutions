@@ -68,16 +68,10 @@ public:
   Point(double x, double y) : x(x), y(y) {}
   Point(const Point &p) : x(p.x), y(p.y) {}
 
-  string logStr() const {
-    stringstream s;
-    s << fixed << setprecision(2)
-      << "(" << x << " " << y << ")";
-    return s.str();
-  }
-
   operator string() const {
     stringstream s;
-    s << int(x) << " " << int(y);
+    s << fixed << setprecision(2)
+      << x << " " << y;
     return s.str();
   }
 
@@ -115,6 +109,10 @@ public:
 
   double slope() const {
     return (x != 0) ? y / x : 0;
+  }
+
+  double islope() const {
+    return (y != 0) ? x / y : 0;
   }
 
   double magnitude() const {
@@ -181,7 +179,7 @@ public:
     {
         if (vec.manhattanMagnitude() == 0.0) {
             stringstream s;
-            s << "The points given do not describe a valid line: A == B == " << A.logStr();
+            s << "The points given do not describe a valid line: A == B == " << string(A);
             throw invalid_argument(s.str());
         }
     }
@@ -207,24 +205,33 @@ public:
 
         // The lines' travel vectors themselves intersect if s && t are each within the interval [0,1]
 
+        // TODO double imprecision?
+        // The lines  2,11 -> 1,10  and  0,9.33 -> 5,6  produce X at ~0.20,9.20
+        // I expect there's a kind of quantization happening, but... where?
+
         return A + vec*t;
     }
 
     bool pointInSegment(const Point &P) const {
-        Point vB = (B - A);
-        Point vP = (P - A);
-        bool sameSlope = vB.slope() == vP.slope();
-        bool containedByB = within(vP.x, 0, vB.x) && within(vP.y, 0, vB.y);
-        return sameSlope && containedByB;
+        // TODO This helps with intersection imprecision, but why is it necessary?
+        bool isA = (A.apply(floor) == P.apply(floor));
+
+        bool isParallel = parallel(Line(A, P));
+        bool inBounds = within(P.x, A.x, B.x) && within(P.y, A.y, B.y);
+
+        // cerr << " isA=" << isA << " parallel=" << isParallel << " bound=" << inBounds << " ";
+        // cerr << string(A) << " == " << string(P) << " ";
+
+        return (isA || isParallel) && inBounds;
     }
 
     bool parallel(const Line &other) const {
-        return vec.apply(abs) == other.vec.apply(abs);
+        return (vec.crossZ(other.vec) == 0.0);
     }
 
     bool operator==(const Line &other) const {
         bool isParallel = parallel(other);
-        bool sharedCoordSpace = (other.A.y == slope * other.A.x + lift);
+        bool sharedCoordSpace = (lift == other.lift);   // TODO ..? Slope is implicit in isParallel, so...
         return isParallel && sharedCoordSpace;
     }
 
@@ -241,7 +248,9 @@ class Polygon {
 
 public:
 
-    Polygon(const vector<Point> &points) : vertices(points) { }
+    Polygon(const vector<Point> &points) : vertices(points) {
+        // Check that each point is unique?
+    }
 
 
     /** Returns a list of <p,i> pairs where p is the intersection between the line A→B
@@ -260,16 +269,6 @@ public:
         Line line_cast(A,B);
 
         cerr << "getting intersections" << endl;
-
-        // TODO I gathered the wrong shapes.
-        // For
-        // A  B
-        // C  D
-        // E  F
-        // I returned B F C D   ← ??? BFD describe a line, not a polygon
-        //        and A E C D         Same for A E C
-        // instead of A B C D   ← Squares
-        //        and F E C D
 
         // Find intersections
         for (int i = 0; i < vertices.size(); ++i) {
@@ -343,15 +342,19 @@ public:
         auto itB = begin + max(idxA, idxB);
 
         // All vertices pA→pB
-        vector<Point> shapeA(itA, itB);
+        vector<Point> shapeA(itA+1, itB+1);
+        if (*(shapeA.end()-1) != pB)
+            shapeA.insert(shapeA.end(), {pB});
+        if (*(shapeA.begin()) != pA)
+            shapeA.insert(shapeA.end(), {pA});
 
         // All vertices pB→pA
-        vector<Point> shapeB(begin, itA);
-        shapeB.insert(shapeB.end(), itB, end);
-
-        // Include {pA,pB} in each new shape
-        shapeA.insert(shapeA.end(), {pA, pB});
-        shapeB.insert(shapeB.end(), {pA, pB});
+        vector<Point> shapeB(begin, itA+1);
+        if (*(shapeB.end()) != pA)
+            shapeB.insert(shapeB.end(), {pA});
+        if (*(itB+1) != pB)
+            shapeB.insert(shapeB.end(), {pB});
+        shapeB.insert(shapeB.end(), itB+1, end);
 
         return vector<Polygon>( {Polygon(shapeA), Polygon(shapeB)} );
     }

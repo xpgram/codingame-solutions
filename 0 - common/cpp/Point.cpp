@@ -63,6 +63,10 @@ public:
     return (x != 0) ? y / x : 0;
   }
 
+  double islope() const {
+    return (y != 0) ? x / y : 0;
+  }
+
   double magnitude() const {
     return sqrt(x*x + y*y);
   }
