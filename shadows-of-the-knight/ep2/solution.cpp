@@ -213,14 +213,9 @@ public:
     }
 
     bool pointInSegment(const Point &P) const {
-        // TODO This helps with intersection imprecision, but why is it necessary?
-        bool isA = (A.apply(floor) == P.apply(floor));
-
-        bool isParallel = parallel(Line(A, P));
+        bool isA = (A == P);    // TODO Within what precision?
+        bool isParallel = vec.crossZ(P - A) < 0.002;    // Quantized b/c floating points
         bool inBounds = within(P.x, A.x, B.x) && within(P.y, A.y, B.y);
-
-        // cerr << " isA=" << isA << " parallel=" << isParallel << " bound=" << inBounds << " ";
-        // cerr << string(A) << " == " << string(P) << " ";
 
         return (isA || isParallel) && inBounds;
     }
@@ -447,6 +442,21 @@ int main()
         if (bomb_clue == "SAME") {
             cerr << "Clue was 'SAME'; I don't have a protocol for this." << endl;
             continue;
+
+            // TODO Finally! I think.
+            // My polygon algorithm finally narrows down on the target.
+            // But now it doesn't know what to do when the distance doesn't change,
+            // which means I need to slice the search by the midline.
+            // 
+            // I suspect doing so wouldn't change the pivot point, however.
+            // Where does batman jump to?
+            // I mean, narrowed or not, I never came up with an endgame;
+            // even if the search polygon was 1 square, batman will orbit around
+            // it forever.
+            //
+            // Funnily, Batman does narrow in on his own.
+            // I think this is because of the bounds of the building, though;
+            // like, he can't always jump to where he wants to.
         }
 
         // Narrow the search space about the reflection line
