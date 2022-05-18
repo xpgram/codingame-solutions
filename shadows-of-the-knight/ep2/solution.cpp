@@ -1,6 +1,7 @@
 #include <iostream>
 #include <sstream>
 #include <iomanip>
+#include <optional>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -184,9 +185,9 @@ public:
         }
     }
 
-    /** Returns a Point object describing where these two lines intersect.
-     * If these lines do not, throws an error. */
-    Point intersection(const Line &other) const {
+    /** Returns a <bool,Point> pair, where the point describes where these two lines intersect.
+     * The bool component is true if these lines do intersect, and false if they do not. */
+    optional<Point> intersection(const Line &other) const {
         // This method uses vector cross-products to determine a ratio for line A (this)
         // by which its travel vector should be multiplied to arrive at the intersection
         // point.
@@ -196,18 +197,14 @@ public:
         Point vecC = A - other.A;   // A vector from this to other's origin point.
 
         double denom = vecA.crossZ(vecB);
-        
+
         if (denom == 0.0)
-            throw domain_error("These lines are parallel or one's definition vector has no length.");
+            return nullopt;
 
         // double s = vecA.cross(vecC) / denom;
         double t = vecB.crossZ(vecC) / denom;
 
         // The lines' travel vectors themselves intersect if s && t are each within the interval [0,1]
-
-        // TODO double imprecision?
-        // The lines  2,11 -> 1,10  and  0,9.33 -> 5,6  produce X at ~0.20,9.20
-        // I expect there's a kind of quantization happening, but... where?
 
         return A + vec*t;
     }
@@ -276,21 +273,22 @@ public:
 
             Line poly_side(I,J);
 
-            if (poly_side.parallel(line_cast)) {
-                cerr << " : parallel; skipping" << endl;
-                continue;
+            optional<Point> intersect = poly_side.intersection(line_cast);
+
+            if (!intersect) {
+              cerr << " : lines do not intersect; skipping" << endl;
+              continue;
             }
 
-            Point intersect = poly_side.intersection(line_cast);
-            cerr << " X " << string(intersect);
+            cerr << " X " << string(*intersect);
 
             if (intersect == J) {   // intersection occurs over a polySide endpoint,
                 cerr << " : potential duplicate; skipping" << endl;
                 continue;           // so only accept one endpoint to exclude duplicates.
             }
 
-            if (poly_side.pointInSegment(intersect)) {
-                intersects.push_back(pair(intersect, i));
+            if (poly_side.pointInSegment(*intersect)) {
+                intersects.push_back(pair(*intersect, i));
                 cerr << " : accepted";
             }
             else
