@@ -70,6 +70,13 @@ public:
         s << int(x) << " " << int(y);
         return s.str();
     }
+
+    string logStr() const {
+        stringstream s;
+        s << fixed << setprecision(2)
+          << x << " " << y;
+        return s.str();
+    }
 };
 
 struct Rect {
@@ -102,7 +109,8 @@ int main()
     string bomb_clue;
     cin >> bomb_clue; cin.ignore();     // dispose of 'UNKNOWN'
 
-    bool xfound = false;
+    bool xfound = (search.left + 1 == search.right);
+    bool nearSide = false;
 
 
     // game loop
@@ -111,25 +119,20 @@ int main()
         lastPos = pos;
 
         // Get new position and derivative points
+        nearSide = !nearSide;
         if (!xfound) {
-          pos.x = (search.left + search.right) / 2;
-          if (pos.x == lastPos.x)
-            pos.x = search.left;
+          pos.x = (nearSide) ? search.left : search.right-1;
         } else {
-          pos.y = (search.top + search.bottom) / 2;
-          if (pos.y == lastPos.y)
-            pos.y = search.top;
+          pos.y = (nearSide) ? search.top : search.bottom-1;
         }
 
-        pos = pos.apply(floor);
-
         travel = pos - lastPos;
-
         mid = lastPos + travel/2.0;
 
         // Report and yield instruction
         cerr << string(search) << endl;
         cerr << string(lastPos) << " -> " << string(pos) << endl;
+        cerr << "mid= " << mid.logStr() << endl;
 
         cout << int(pos.x) << " " << int(pos.y) << endl;
 
@@ -138,14 +141,17 @@ int main()
 
         // Function which gets new search-space limits for an axis
         auto getNewLimits = [](double mid, double travel, string clue, double min, double max) {
+          cerr << "checking " << mid << " " << travel << " " << clue << endl;
+
           if (clue == "SAME") {
-            min = ::min(mid, mid+travel);
-            max = ::max(mid, mid+travel) + 1;
+            min = mid;
+            max = mid + 1;
           } else if (travel > 0 && clue == "WARMER" || travel < 0 && clue == "COLDER")
             min = mid + 1;
           else
-            max = mid - 1;
+            max = mid;
           
+          cerr << "new bounds = " << floor(min) << " , " << ceil(max) << endl;
           return make_tuple(floor(min), ceil(max));
         };
 
@@ -162,11 +168,20 @@ int main()
           search.bottom = nxt_max;
         }
 
-        if (search.left + 1 == search.right) {
+        if (!xfound && search.left + 1 == search.right) {
           cerr << "solved: x = " << search.left << endl;
-          pos.x = search.left;
+
+          // Move into position; discard confusing bomb clue
+          if (pos.x != search.left) {
+              pos.x = search.left;
+              cout << int(pos.x) << " " << int(pos.y) << endl;
+              cin >> bomb_clue; cin.ignore();
+          }
+
+          // Ensure next y-axis move is not to same pos
+          nearSide = (pos.y == search.top);
+
           xfound = true;
         }
-
     }
 }
