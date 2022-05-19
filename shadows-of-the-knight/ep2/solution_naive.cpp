@@ -28,6 +28,25 @@ space again.
 I could reflect about the middle, wherever I want the midline to be,
 but this won't work against the building's borders.
 
+
+Okay, also, after some analysis, the polygon solution does have some
+advantages.
+
+There are times when reflecting about the search-space middle generates
+a bad coord, and my algorithm here is forced then to waste a turn
+repositioning itself so it can then resume being useful.
+
+When you're working with both axes at the same time, you have more
+freedom. If your x coord is a little cramped and useless, you can
+still make progress that turn via the y coord.
+
+This one guy's solution basically paints a bitmap image of the space
+he's searching, uses a lot of sqrt's too, but *I think* it would
+solve the last two conditions where mine didn't.
+
+And my polygon solution, with just a little more boilerplate than his,
+could probably do the same thing more efficiently.
+
 */
 
 bool within(double n, double min, double max) {
