@@ -19,6 +19,15 @@ I can still use rectangles in this case.
 
 [In fact, that's the solution I'm using here ↓]
 
+TODO This method suffers some redundancies.
+It alternates between the left and right edges of the search area, so
+when it moves to the other side, but the clue is colder, the area shrinks
+*away* from your current location, which means Batman has to spend an
+entire turn repositioning himself before he can start narrowing the
+space again.
+I could reflect about the middle, wherever I want the midline to be,
+but this won't work against the building's borders.
+
 */
 
 bool within(double n, double min, double max) {
