@@ -11,42 +11,24 @@ using namespace std;
 
 /* Observations
 
-For any jump from point A to B, there will be some line for which all
-cells are equidistant to points A and B. A target anywhere on this
-line would yield 'SAME'.
+[ ] Rejiggering method
+A bad coord is out of bounds or no-movement. I need to pick a new location
+that still cuts down the search space but also enables useful jumps in the
+future.
 
-A first, naive solution might be to solve for x-col first, then y-row.
-I can still use rectangles in this case.
+[ ] Distance slicing
+The only important bit is the midline, so instead of jumping *around*
+the polygon, I can also jump small distances. This can be an effective
+strategy to slicing the polygon in half when the it's kind of budged up
+against the building's corners.
 
-[In fact, that's the solution I'm using here ↓]
+Because the polygon can technically be infinitely thin, I'll probably want
+to generate a few jump points, at least two perpendicular to each other,
+and see which one cuts out the most area.
 
-For the redraft, lets try reflecting about a center point so my midline
-travels directly through it.
-That way, conceivably, batman might zip around the entire building
-looking completely aimless, but in fact he's maximizing the
-narrowification of the search space.
-
-I might look into this polygon slicing, though.
-- I would keep a vector of points.
-- getIntersectionPoints() would check for a collision with each line
-*segment* and return two intersection points. If it returns one or zero,
-the midline does not sufficiently intersect the shape and we should take
-another turn.
-- Those points would be slotted in between each each point defining
-the segment it intersects with.
-- There are now two shapes:
-  - one which includes all points in the sequence A → B,
-  - and one which includes all points in the sequence B → A
-- The center points for each shape can be obtained the average of all
-vertices.
-- The center of shape A→B is "WARM" if it is closer to batman than B→A
-- The clue shall match one of these descriptions, the non-matching will
-be dropped.
-- Batman's next position should be reflected about the remaining shape's
-average.
-- The mid point used to define the line which slices the shape next must
-be derived in case Batman couldn't travel far enough (such as beyond the
-bounds of the building).
+The area calculation can be fast. I may just draw a rectangle around the bounds.
+It only really matters in extreme cases where the poly is way more tall than it
+is wide.
 
 */
 
